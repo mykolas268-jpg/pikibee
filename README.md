@@ -21,7 +21,7 @@ No environment variables are required yet.
 | `content/site.ts` | Every user-facing string, the spec table, and the footer links. A Lithuanian translation is a change to this file only. |
 | `app/page.tsx` | Section assembly and the scroll wiring that drives the 3D camera. |
 | `components/HoneycombMap.tsx` | The three.js scene. |
-| `lib/honeycomb.ts` | Procedural lattice + geometry. Pure, seeded, no assets. |
+| `lib/honeycomb.ts` | Procedural lattice, packet layout, and the morphing geometry writer. Pure, seeded, no assets. |
 | `components/Logo.tsx` | Text wordmark. Swap its contents for an `<svg>`; nothing else knows what the logo is. |
 | `app/api/waitlist/route.ts` | Waitlist stub. Refuses anything without recorded consent. |
 | `app/privacy/page.tsx` | Privacy notice, rendered from `privacy` in `content/site.ts`. |
@@ -76,9 +76,19 @@ your email provider.
   `prefers-reduced-motion` also disables the fill animation, the idle drift and
   the typewriter.
 - The comb never leaves the page. Over the tail of the heroes it hands over
-  from the full stage to a docked corner framing and dims; the sections below
-  reserve that corner. Framing is done **inside the scene** (`Frame` in
-  `HoneycombMap`), not with a CSS transform on the canvas — scaling the canvas
-  element makes R3F re-measure and reallocate its drawing buffer on every
-  scroll frame.
+  from the full stage to a docked corner framing — and on the way it **folds
+  itself into the gel packet**. Every cell keeps its identity through the
+  morph: `assignGelPoses` gives each one a second pose on a pillowed rectangle
+  with crimped seals and a printed band, and `writeCombGeometry` interpolates
+  between the two poses straight into the vertex buffers. There is no second
+  model and no cross-fade.
+- Rewriting those buffers is the entire cost of the transition, and it is
+  skipped whenever the morph value is parked at either end — which is the whole
+  page apart from the handover. That is also why the outlines are built by hand
+  instead of with `EdgesGeometry`: the edge topology never changes, only the
+  positions, so re-deriving edges per frame would cost far more than writing
+  them.
+- Framing is done **inside the scene** (`Frame` in `HoneycombMap`), not with a
+  CSS transform on the canvas — scaling the canvas element makes R3F re-measure
+  and reallocate its drawing buffer on every scroll frame.
 - The render loop stops only when the tab is hidden.

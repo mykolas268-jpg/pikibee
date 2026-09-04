@@ -20,17 +20,20 @@ const HoneycombMap = dynamic(() => import('@/components/HoneycombMap'), {
 
 const clamp01 = (value: number) => (value < 0 ? 0 : value > 1 ? 1 : value);
 
-// Where the comb sits, as fractions of its canvas. Desktop canvas is the right
-// half of the viewport; mobile canvas is the whole viewport, with the comb
-// framed into a band above the copy.
+// Where the object sits, as fractions of its canvas. Desktop canvas is the
+// right half of the viewport; mobile canvas is the whole viewport, with the
+// comb framed into a band above the copy.
+//
+// The docked frame is generous: by then the comb has become the gel packet,
+// and the packet is the product — it earns a proper look, not a watermark.
 const FRAMES = {
   desktop: {
     home: { cx: 0.5, cy: 0.5, w: 1, h: 1 },
-    docked: { cx: 0.72, cy: 0.76, w: 0.44, h: 0.44 },
+    docked: { cx: 0.7, cy: 0.72, w: 0.62, h: 0.5 },
   },
   mobile: {
     home: { cx: 0.5, cy: 0.28, w: 1, h: 0.4 },
-    docked: { cx: 0.74, cy: 0.82, w: 0.46, h: 0.24 },
+    docked: { cx: 0.66, cy: 0.8, w: 0.56, h: 0.22 },
   },
 } satisfies Record<string, { home: Frame; docked: Frame }>;
 
@@ -61,7 +64,8 @@ export default function Page() {
   });
 
   // The comb never leaves the page. Over the tail of the heroes it hands over
-  // from the full stage to its docked corner instead of disappearing.
+  // from the full stage to its docked corner — and, on the way, folds itself
+  // into the gel packet. One value drives both.
   const dockAt = (progress: number) => clamp01((progress - 0.88) / 0.12);
   const dock = useTransform(stage, dockAt);
 

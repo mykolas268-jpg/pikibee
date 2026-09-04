@@ -1,17 +1,19 @@
 'use client';
 
-import { useEffect, useMemo, useRef } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, type MutableRefObject } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { AdaptiveDpr, OrthographicCamera } from '@react-three/drei';
 import type { MotionValue } from 'framer-motion';
 import * as THREE from 'three';
 import {
   PALETTE,
-  buildCombGeometry,
   buildFillCapGeometry,
   buildFillTubeGeometry,
   buildLattice,
   buildMarkerGeometry,
+  createCombGeometry,
+  createEdgeGeometry,
+  writeCombGeometry,
   type FillCell,
   type Lattice,
 } from '@/lib/honeycomb';
@@ -94,30 +96,29 @@ function Rig() {
   );
 }
 
-function Comb({ lattice }: { lattice: Lattice }) {
-  const geometry = useMemo(() => buildCombGeometry(lattice.cells), [lattice]);
-  const edges = useMemo(() => new THREE.EdgesGeometry(geometry, 1), [geometry]);
-
-  useEffect(() => {
-    return () => {
-      geometry.dispose();
-      edges.dispose();
-    };
-  }, [geometry, edges]);
-
+function Comb({
+  solid,
+  edges,
+}: {
+  solid: THREE.BufferGeometry;
+  edges: THREE.BufferGeometry;
+}) {
   return (
     <group>
-      <mesh geometry={geometry}>
+      <mesh geometry={solid} frustumCulled={false}>
         <meshBasicMaterial vertexColors toneMapped={false} />
       </mesh>
-      <lineSegments geometry={edges}>
+      <lineSegments geometry={edges} frustumCulled={false}>
         <lineBasicMaterial color={PALETTE.amberDeep} toneMapped={false} />
       </lineSegments>
     </group>
   );
 }
 
-function Plate({ extent }: { extent: number }) {
+const Plate = forwardRef<THREE.Group, { extent: number }>(function Plate(
+  { extent },
+  ref,
+) {
   const size = extent * 2 * 1.04;
   const geometry = useMemo(
     () => new THREE.BoxGeometry(size, 0.24, size),
@@ -133,7 +134,7 @@ function Plate({ extent }: { extent: number }) {
   }, [geometry, edges]);
 
   return (
-    <group position={[0, -0.12, 0]}>
+    <group ref={ref} position={[0, -0.12, 0]}>
       <mesh geometry={geometry}>
         <meshBasicMaterial color={PALETTE.plate} toneMapped={false} />
       </mesh>
@@ -142,12 +143,18 @@ function Plate({ extent }: { extent: number }) {
       </lineSegments>
     </group>
   );
-}
+});
 
 const dummy = new THREE.Object3D();
 const scratchColor = new THREE.Color();
 
-function Markers({ lattice }: { lattice: Lattice }) {
+function Markers({
+  lattice,
+  morph,
+}: {
+  lattice: Lattice;
+  morph: MutableRefObject<number>;
+}) {
   const ref = useRef<THREE.InstancedMesh>(null);
   const geometry = useMemo(() => buildMarkerGeometry(), []);
 
@@ -157,13 +164,17 @@ function Markers({ lattice }: { lattice: Lattice }) {
     const mesh = ref.current;
     if (!mesh) return;
     const t = state.clock.getElapsedTime();
+    // The bees belong to the comb, not to the packet.
+    const away = 1 - THREE.MathUtils.clamp(morph.current / 0.45, 0, 1);
+    mesh.visible = away > 0.01;
+    if (!mesh.visible) return;
 
     for (let i = 0; i < lattice.markers.length; i += 1) {
       const marker = lattice.markers[i];
       const pulse = 0.5 + 0.5 * Math.sin(t * 1.5 + marker.phase);
       dummy.position.set(marker.x, marker.y, marker.z);
       dummy.rotation.set(0, marker.rotation, 0);
-      dummy.scale.setScalar(0.72 + pulse * 0.55);
+      dummy.scale.setScalar((0.72 + pulse * 0.55) * away);
       dummy.updateMatrix();
       mesh.setMatrixAt(i, dummy.matrix);
       mesh.setColorAt(i, scratchColor.setScalar(0.32 + pulse * 0.68));
@@ -189,7 +200,14 @@ function Markers({ lattice }: { lattice: Lattice }) {
 }
 
 /** One open comb cell with a hex cap climbing it — honey filling the comb. */
-function Fill({ cell }: { cell: FillCell }) {
+function Fill({
+  cell,
+  morph,
+}: {
+  cell: FillCell;
+  morph: MutableRefObject<number>;
+}) {
+  const group = useRef<THREE.Group>(null);
   const cap = useRef<THREE.Mesh>(null);
   const tube = useMemo(() => buildFillTubeGeometry(cell.height), [cell.height]);
   const capGeometry = useMemo(() => buildFillCapGeometry(), []);
@@ -204,7 +222,11 @@ function Fill({ cell }: { cell: FillCell }) {
   }, [tube, capGeometry, edges]);
 
   useFrame((state) => {
-    if (!cap.current) return;
+    if (!cap.current || !group.current) return;
+    const away = 1 - THREE.MathUtils.clamp(morph.current / 0.4, 0, 1);
+    group.current.visible = away > 0.01;
+    group.current.scale.setScalar(away);
+    if (!group.current.visible) return;
     const cycle = FILL_DURATION + FILL_PAUSE;
     const t = (state.clock.getElapsedTime() + cell.delay) % cycle;
     const k = THREE.MathUtils.clamp(t / FILL_DURATION, 0, 1);
@@ -213,7 +235,7 @@ function Fill({ cell }: { cell: FillCell }) {
   });
 
   return (
-    <group position={[cell.x, 0, cell.z]}>
+    <group ref={group} position={[cell.x, 0, cell.z]}>
       <mesh geometry={tube} position={[0, cell.height / 2, 0]}>
         <meshBasicMaterial
           color={PALETTE.amberDeep}
@@ -256,8 +278,22 @@ function Stage({
   dock: MotionValue<number>;
 }) {
   const group = useRef<THREE.Group>(null);
+  const plate = useRef<THREE.Group>(null);
   const eased = useRef(0);
   const easedDock = useRef(0);
+  /** Shared with the children, which read it in their own useFrame. */
+  const morph = useRef(0);
+  const written = useRef(-1);
+
+  const solid = useMemo(() => createCombGeometry(lattice.cells), [lattice]);
+  const edges = useMemo(() => createEdgeGeometry(lattice.cells), [lattice]);
+
+  useEffect(() => {
+    return () => {
+      solid.dispose();
+      edges.dispose();
+    };
+  }, [solid, edges]);
 
   useFrame((state, delta) => {
     const node = group.current;
@@ -271,16 +307,42 @@ function Stage({
       delta,
     );
     const d = easedDock.current;
+    morph.current = d;
     const size = state.size;
     const camera = state.camera as THREE.OrthographicCamera;
+
+    // --- morph ---------------------------------------------------------
+    // The comb folds itself into the gel sachet. Rewriting the buffers is the
+    // whole cost of the transition, so skip it while the value is parked at
+    // either end — which is the entire page apart from the handover.
+    if (Math.abs(d - written.current) > 0.0005) {
+      writeCombGeometry(solid, edges, lattice.cells, d);
+      written.current = d;
+    }
+
+    // The plate follows the object so the packet is not marooned on a square
+    // field sized for the comb.
+    const halfX = mix(lattice.extent, lattice.gelPlate.halfX, d);
+    const halfZ = mix(lattice.extent, lattice.gelPlate.halfZ, d);
+    if (plate.current) {
+      plate.current.scale.set(
+        halfX / lattice.extent,
+        1,
+        halfZ / lattice.extent,
+      );
+    }
+
+    // Isometric projects a rectangle of half-sizes (a, c) to sqrt(2)*(a+c)
+    // across, so the fit is driven by their mean, not by the larger of them.
+    const extent = (halfX + halfZ) / 2;
 
     const boxW = mix(home.w, docked.w, d) * size.width;
     const boxH = mix(home.h, docked.h, d) * size.height;
     // Isometric turns the square plate into a diamond far wider than tall, so
     // fit each axis against its own projected extent.
     const zoom = Math.min(
-      boxW / (PROJECTED_WIDTH * lattice.extent * MARGIN),
-      boxH / (PROJECTED_HEIGHT * lattice.extent * MARGIN),
+      boxW / (PROJECTED_WIDTH * extent * MARGIN),
+      boxH / (PROJECTED_HEIGHT * extent * MARGIN),
     );
     if (camera.zoom !== zoom) {
       camera.zoom = zoom;
@@ -326,10 +388,13 @@ function Stage({
 
   return (
     <group ref={group}>
-      <Plate extent={lattice.extent} />
-      <Comb lattice={lattice} />
-      <Markers lattice={lattice} />
-      {fills && lattice.fills.map((cell, i) => <Fill key={i} cell={cell} />)}
+      <Plate ref={plate} extent={lattice.extent} />
+      <Comb solid={solid} edges={edges} />
+      <Markers lattice={lattice} morph={morph} />
+      {fills &&
+        lattice.fills.map((cell, i) => (
+          <Fill key={i} cell={cell} morph={morph} />
+        ))}
     </group>
   );
 }

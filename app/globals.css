@@ -49,13 +49,15 @@
    */
   .comb-dock {
     --dock: 0;
-    --dock-fade: 0.62;
+    --dock-fade: 0.5;
     opacity: calc(1 - var(--dock) * var(--dock-fade));
   }
 
+  /* On desktop the datasheet reserves the docked corner, so the packet does
+     not have to be dimmed out of the way — it is the product. */
   @media (min-width: 768px) {
     .comb-dock {
-      --dock-fade: 0.46;
+      --dock-fade: 0.12;
     }
   }
 }
