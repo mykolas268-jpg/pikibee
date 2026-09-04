@@ -76,6 +76,13 @@ export const specSection = {
     'TODO — nutrition declaration and allergen statement. Values per serving, subject to final formulation.',
 } as const;
 
+/**
+ * Version the consent wording. A consent record is only evidence if you can
+ * say what the person actually agreed to, so bump this string whenever the
+ * checkbox label or the notice below changes, and store it with the address.
+ */
+export const CONSENT_VERSION = '2026-09-04';
+
 export const earlyAccess = {
   index: '04 / ACCESS',
   title: 'Early Access',
@@ -84,20 +91,86 @@ export const earlyAccess = {
   submit: 'JOIN',
   submitting: 'SENDING',
   success: '// QUEUED. WE WRITE WHEN THE BATCH IS READY.',
+  consent: {
+    // Must stay unticked by default: GDPR Art. 4(11) requires an affirmative
+    // action, and a pre-ticked box is not one.
+    label: 'Send me one email when the first batch is ready.',
+    detail:
+      'We store your address for that one email and nothing else. No sharing, no profiling, no newsletter. Withdraw any time.',
+    linkLabel: 'PRIVACY NOTICE',
+    linkHref: '/privacy',
+  },
   errors: {
     invalid: '// INVALID ADDRESS.',
+    consent: '// TICK THE BOX TO CONTINUE.',
     failed: '// REQUEST FAILED. TRY AGAIN.',
   },
 } as const;
 
 export const footer = {
   copyright: '(c) 2026 pikibee. All rights reserved.',
-  // TODO: replace with real destinations.
   links: [
+    // TODO: replace the first three with real destinations.
     { label: 'INSTAGRAM', href: '#' },
     { label: 'STRAVA', href: '#' },
     { label: 'CONTACT', href: '#' },
+    { label: 'PRIVACY', href: '/privacy' },
   ],
+} as const;
+
+/**
+ * Privacy notice for the waitlist.
+ *
+ * This is a working skeleton with the Art. 13 GDPR disclosures in place, not
+ * legal advice and not signed off by anyone. The TODOs are the facts only you
+ * can supply — they are not optional: a notice that cannot name its controller
+ * does not satisfy Art. 13(1)(a).
+ */
+export const privacy = {
+  index: '05 / PRIVACY',
+  title: 'Privacy Notice',
+  updated: `Version ${CONSENT_VERSION}`,
+  intro:
+    'This notice covers one thing: the email address you give us to be told when the first batch is ready. We run no other collection on this site — no analytics, no advertising pixels, no cookies beyond what the page needs to render.',
+  sections: [
+    {
+      key: 'CONTROLLER',
+      body: 'TODO — registered legal entity, address, and a contact address that a person actually reads. Required by Art. 13(1)(a) GDPR; the notice is incomplete without it.',
+    },
+    {
+      key: 'WHAT WE COLLECT',
+      body: 'Your email address. With it we store the moment you gave consent, the wording you agreed to, and the version of this notice in force at the time. Nothing else — no name, no location, no device fingerprint.',
+    },
+    {
+      key: 'WHY',
+      body: 'To send you one email announcing the first batch. That is the whole purpose. We do not use the address for anything else, and we do not build a profile from it.',
+    },
+    {
+      key: 'LEGAL BASIS',
+      body: 'Your consent, under Art. 6(1)(a) GDPR. You give it by ticking the box; nothing is pre-ticked. Withdrawing it is as easy as giving it, and withdrawal does not affect the lawfulness of anything done before.',
+    },
+    {
+      key: 'WHO ELSE SEES IT',
+      body: 'TODO — name the email provider once it is chosen, and confirm whether it stores data outside the EEA. If it does, name the transfer safeguard (Art. 46 GDPR). No other recipients.',
+    },
+    {
+      key: 'HOW LONG',
+      body: 'Until the launch email has been sent, or until you withdraw consent — whichever comes first. After that the address is deleted. TODO: confirm the retention window with whatever provider you pick, and make sure deletion actually propagates to it.',
+    },
+    {
+      key: 'YOUR RIGHTS',
+      body: 'Access, rectification, erasure, restriction, portability, objection, and withdrawal of consent at any time. Write to the contact address above and we act without undue delay. You can also complain to the Lithuanian supervisory authority, Valstybine duomenu apsaugos inspekcija (VDAI), ada.lt.',
+    },
+    {
+      key: 'AUTOMATED DECISIONS',
+      body: 'None. No profiling, no automated decision-making with legal or similarly significant effects.',
+    },
+    {
+      key: 'IS IT REQUIRED',
+      body: 'No. Giving us your address is voluntary. The only consequence of not giving it is that we cannot tell you when the batch is ready.',
+    },
+  ],
+  back: 'BACK TO SITE',
 } as const;
 
 export type SpecRow = (typeof specSection.spec)[number];

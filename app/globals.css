@@ -34,6 +34,30 @@
   .animate-blink {
     animation: blink 1s steps(1, end) infinite;
   }
+
+  /*
+   * The honeycomb never leaves the page. Once the heroes are done it retires
+   * to the bottom-right corner and keeps running there as a live instrument
+   * behind the datasheet.
+   *
+   * Only the opacity is CSS. The move and the resize happen inside the scene:
+   * a CSS transform on the canvas would make R3F re-measure and reallocate its
+   * drawing buffer on every scroll frame.
+   *
+   * --dock (0..1) is written straight onto the node from a MotionValue, so
+   * scrolling costs no React render.
+   */
+  .comb-dock {
+    --dock: 0;
+    --dock-fade: 0.62;
+    opacity: calc(1 - var(--dock) * var(--dock-fade));
+  }
+
+  @media (min-width: 768px) {
+    .comb-dock {
+      --dock-fade: 0.46;
+    }
+  }
 }
 
 @keyframes blink {

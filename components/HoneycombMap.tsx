@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useMemo, useRef } from 'react';
-import { Canvas, useFrame, useThree } from '@react-three/fiber';
+import { Canvas, useFrame } from '@react-three/fiber';
 import { AdaptiveDpr, OrthographicCamera } from '@react-three/drei';
 import type { MotionValue } from 'framer-motion';
 import * as THREE from 'three';
@@ -20,6 +20,21 @@ const SEED = 20260904;
 const FILL_DURATION = 4;
 const FILL_PAUSE = 1.2;
 
+/**
+ * Where the comb sits inside the canvas, in fractions of the canvas box:
+ * `cx`/`cy` is the centre, `w`/`h` the share of the box it fits into.
+ *
+ * Framing lives here rather than in a CSS transform on the canvas: scaling the
+ * canvas element makes R3F re-measure and reallocate its drawing buffer on
+ * every scroll frame, and downsamples the render on top of it.
+ */
+export interface Frame {
+  cx: number;
+  cy: number;
+  w: number;
+  h: number;
+}
+
 export interface HoneycombMapProps {
   /**
    * Sawtooth 0 -> 1 per hero section. Read inside useFrame only: this drives
@@ -30,8 +45,16 @@ export interface HoneycombMapProps {
   rows?: number;
   /** Fill animation is dropped on mobile. */
   fills?: boolean;
-  /** Stop the render loop when the stage has scrolled away. */
+  /** Slow idle drift, so the comb reads as live even when nobody scrolls. */
+  drift?: boolean;
+  /** Stop the render loop when the tab is hidden. */
   active?: boolean;
+  /** Framing while the heroes are on screen. */
+  home: Frame;
+  /** Framing once the comb has retired to its corner. */
+  docked: Frame;
+  /** 0 -> 1 across the handover between the two framings. */
+  dock: MotionValue<number>;
   className?: string;
 }
 
@@ -47,22 +70,25 @@ const PROJECTED_WIDTH = 2 * Math.SQRT2;
 const PROJECTED_HEIGHT = 1.75;
 const MARGIN = 1.07;
 
-function Rig({ extent }: { extent: number }) {
-  const size = useThree((state) => state.size);
-  // Ortho zoom is pixels-per-world-unit, so it has to come off the canvas box
-  // or the comb changes size with the window.
-  const zoom = Math.min(
-    size.width / (PROJECTED_WIDTH * extent * MARGIN),
-    size.height / (PROJECTED_HEIGHT * extent * MARGIN),
-  );
+/** Screen basis of the fixed isometric camera, precomputed once. */
+const RIGHT = new THREE.Vector3(14, 12, 14)
+  .clone()
+  .normalize()
+  .cross(new THREE.Vector3(0, 1, 0))
+  .normalize()
+  .multiplyScalar(-1);
+const UP = new THREE.Vector3(14, 12, 14).clone().normalize().cross(RIGHT).normalize();
 
+function Rig() {
+  // Zoom is driven per frame from the current framing, so the value here is
+  // only a starting point.
   return (
     <OrthographicCamera
       makeDefault
       position={[14, 12, 14]}
       near={-200}
       far={200}
-      zoom={zoom}
+      zoom={40}
       onUpdate={(camera) => camera.lookAt(0, 0, 0)}
     />
   );
@@ -209,22 +235,66 @@ function Fill({ cell }: { cell: FillCell }) {
   );
 }
 
+const mix = (a: number, b: number, t: number) => a + (b - a) * t;
+const offset = new THREE.Vector3();
+
 function Stage({
   lattice,
   progress,
   fills,
+  drift,
+  home,
+  docked,
+  dock,
 }: {
   lattice: Lattice;
   progress: MotionValue<number>;
   fills: boolean;
+  drift: boolean;
+  home: Frame;
+  docked: Frame;
+  dock: MotionValue<number>;
 }) {
   const group = useRef<THREE.Group>(null);
   const eased = useRef(0);
+  const easedDock = useRef(0);
 
   useFrame((state, delta) => {
     const node = group.current;
     if (!node) return;
 
+    // --- framing -------------------------------------------------------
+    easedDock.current = THREE.MathUtils.damp(
+      easedDock.current,
+      dock.get(),
+      6,
+      delta,
+    );
+    const d = easedDock.current;
+    const size = state.size;
+    const camera = state.camera as THREE.OrthographicCamera;
+
+    const boxW = mix(home.w, docked.w, d) * size.width;
+    const boxH = mix(home.h, docked.h, d) * size.height;
+    // Isometric turns the square plate into a diamond far wider than tall, so
+    // fit each axis against its own projected extent.
+    const zoom = Math.min(
+      boxW / (PROJECTED_WIDTH * lattice.extent * MARGIN),
+      boxH / (PROJECTED_HEIGHT * lattice.extent * MARGIN),
+    );
+    if (camera.zoom !== zoom) {
+      camera.zoom = zoom;
+      camera.updateProjectionMatrix();
+    }
+
+    const px = (mix(home.cx, docked.cx, d) - 0.5) * size.width;
+    const py = (mix(home.cy, docked.cy, d) - 0.5) * size.height;
+    offset
+      .copy(RIGHT)
+      .multiplyScalar(px / zoom)
+      .addScaledVector(UP, -py / zoom);
+
+    // --- dolly ---------------------------------------------------------
     // Damped follow. The MotionValue is a hard sawtooth — it snaps to 0 at each
     // section boundary — and the damping turns that snap into a fast pull-back
     // instead of a one-frame cut.
@@ -238,11 +308,20 @@ function Stage({
 
     // End of the dolly is a full-bleed macro crop of the comb: the lattice
     // overflows the canvas on every side, so there is no floating-object gap.
+    const t = state.clock.getElapsedTime();
+
+    // A slow oscillation rather than a spin: the comb never leaves the page
+    // now, and a static isometric plate parked in the corner reads as a dead
+    // image. +/- 7 degrees keeps the isometric read intact.
+    const idle = drift ? Math.sin(t * 0.11) * 0.12 : 0;
+
     node.scale.setScalar(1 + p * 1.45);
-    node.rotation.y = p * 0.3;
-    node.position.y =
-      -p * 0.25 + Math.sin(state.clock.getElapsedTime() * 0.35) * 0.05;
-    node.position.x = -p * 0.12;
+    node.rotation.y = p * 0.3 + idle;
+    node.position.set(
+      offset.x - p * 0.12,
+      offset.y - p * 0.25 + Math.sin(t * 0.35) * 0.05,
+      offset.z,
+    );
   });
 
   return (
@@ -262,7 +341,11 @@ export default function HoneycombMap({
   cols = 15,
   rows = 15,
   fills = true,
+  drift = true,
   active = true,
+  home,
+  docked,
+  dock,
   className = '',
 }: HoneycombMapProps) {
   const lattice = useMemo(
@@ -285,9 +368,17 @@ export default function HoneycombMap({
         gl={{ antialias: true, alpha: true, powerPreference: 'high-performance' }}
         style={{ background: 'transparent' }}
       >
-        <Rig extent={lattice.extent} />
+        <Rig />
         <AdaptiveDpr pixelated={false} />
-        <Stage lattice={lattice} progress={progress} fills={fills} />
+        <Stage
+          lattice={lattice}
+          progress={progress}
+          fills={fills}
+          drift={drift}
+          home={home}
+          docked={docked}
+          dock={dock}
+        />
       </Canvas>
     </div>
   );

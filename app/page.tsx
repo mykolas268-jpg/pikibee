@@ -2,17 +2,13 @@
 
 import { useEffect, useRef, useState } from 'react';
 import dynamic from 'next/dynamic';
-import {
-  motion,
-  useMotionValueEvent,
-  useScroll,
-  useTransform,
-} from 'framer-motion';
+import { useMotionValueEvent, useScroll, useTransform } from 'framer-motion';
 import Navbar from '@/components/Navbar';
 import HeroSection from '@/components/HeroSection';
 import SpecSheet from '@/components/SpecSheet';
 import EarlyAccess from '@/components/EarlyAccess';
 import Footer from '@/components/Footer';
+import type { Frame } from '@/components/HoneycombMap';
 import { heroes } from '@/content/site';
 import { useIsMobile, usePrefersReducedMotion } from '@/lib/useMediaQuery';
 
@@ -22,10 +18,27 @@ const HoneycombMap = dynamic(() => import('@/components/HoneycombMap'), {
   ssr: false,
 });
 
+const clamp01 = (value: number) => (value < 0 ? 0 : value > 1 ? 1 : value);
+
+// Where the comb sits, as fractions of its canvas. Desktop canvas is the right
+// half of the viewport; mobile canvas is the whole viewport, with the comb
+// framed into a band above the copy.
+const FRAMES = {
+  desktop: {
+    home: { cx: 0.5, cy: 0.5, w: 1, h: 1 },
+    docked: { cx: 0.72, cy: 0.76, w: 0.44, h: 0.44 },
+  },
+  mobile: {
+    home: { cx: 0.5, cy: 0.28, w: 1, h: 0.4 },
+    docked: { cx: 0.74, cy: 0.82, w: 0.46, h: 0.24 },
+  },
+} satisfies Record<string, { home: Frame; docked: Frame }>;
+
 export default function Page() {
   const stageRef = useRef<HTMLDivElement>(null);
   const heroOne = useRef<HTMLElement>(null);
   const heroTwo = useRef<HTMLElement>(null);
+  const combRef = useRef<HTMLDivElement>(null);
 
   const isMobile = useIsMobile();
   const reduced = usePrefersReducedMotion();
@@ -47,43 +60,72 @@ export default function Page() {
     offset: ['start start', 'end start'],
   });
 
+  // The comb never leaves the page. Over the tail of the heroes it hands over
+  // from the full stage to its docked corner instead of disappearing.
+  const dockAt = (progress: number) => clamp01((progress - 0.88) / 0.12);
+  const dock = useTransform(stage, dockAt);
+
   // Sawtooth: dolly in across hero 1, snap back, dolly in across hero 2.
   // HoneycombMap damps this inside useFrame, so the snap reads as a fast
   // pull-back rather than a cut, and no React render happens per scroll tick.
-  // Switch on `a` rather than `b`: at the exact section boundary both hero 2's
-  // progress and the previous test would read 0, pinning the comb at full zoom.
-  const dolly = useTransform<number, number>([first, second], ([a, b]) =>
-    a >= 1 ? b : a,
+  //
+  // Switch on `a` rather than `b`: at the exact section boundary hero 2's
+  // progress reads 0, and testing `b > 0` would pin the comb at full zoom.
+  //
+  // Unwinding by the dock matters: docking a comb still held at 2.45x would
+  // park a cropped close-up in the corner instead of the whole plate.
+  const dolly = useTransform<number, number>(
+    [first, second, stage],
+    ([a, b, s]) => (a >= 1 ? b : a) * (1 - dockAt(s)),
   );
 
-  // The comb belongs to the heroes only; it clears out before the spec sheet.
-  const opacity = useTransform(stage, [0, 0.9, 0.99], [1, 1, 0]);
-  const [live, setLive] = useState(true);
-  useMotionValueEvent(opacity, 'change', (value) => {
-    const next = value > 0.02;
-    setLive((current) => (current === next ? current : next));
+  // Written straight onto the node: a CSS variable costs no React render.
+  const applyDock = (value: number) =>
+    combRef.current?.style.setProperty('--dock', value.toFixed(4));
+  useMotionValueEvent(dock, 'change', applyDock);
+
+  // `change` never fires for a reload that lands mid-page, so seed it once the
+  // canvas node exists.
+  useEffect(() => {
+    if (mounted) applyDock(dock.get());
   });
+
+  // Nothing is gated on scroll any more, so the only reason to stop drawing is
+  // that nobody is looking at the tab.
+  const [visible, setVisible] = useState(true);
+  useEffect(() => {
+    const sync = () => setVisible(!document.hidden);
+    sync();
+    document.addEventListener('visibilitychange', sync);
+    return () => document.removeEventListener('visibilitychange', sync);
+  }, []);
+
+  const frames = isMobile ? FRAMES.mobile : FRAMES.desktop;
 
   return (
     <>
       <Navbar />
 
-      <motion.div
+      <div
+        ref={combRef}
         aria-hidden="true"
-        style={{ opacity }}
-        className="pointer-events-none fixed left-0 top-[9vh] z-0 h-[40vh] w-full md:left-auto md:right-0 md:top-0 md:h-screen md:w-1/2"
+        className="comb-dock pointer-events-none fixed inset-0 z-0 md:left-auto md:right-0 md:w-1/2"
       >
         {mounted && (
           <HoneycombMap
             progress={dolly}
-            active={live}
+            dock={dock}
+            home={frames.home}
+            docked={frames.docked}
+            active={visible}
             cols={isMobile ? 8 : 15}
             rows={isMobile ? 8 : 15}
             fills={!isMobile && !reduced}
+            drift={!reduced}
             className="h-full w-full"
           />
         )}
-      </motion.div>
+      </div>
 
       <main className="relative z-10">
         <div ref={stageRef}>
@@ -91,7 +133,11 @@ export default function Page() {
           <HeroSection ref={heroTwo} {...heroes[1]} typeDelay={200} />
         </div>
 
-        <div className="relative bg-ink">
+        {/*
+          No opaque backdrop here: the docked comb has to show through. The
+          sections below reserve the corner it docks into.
+        */}
+        <div className="relative">
           <SpecSheet />
           <EarlyAccess />
           <Footer />

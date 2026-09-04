@@ -1,4 +1,8 @@
+import Link from 'next/link';
 import { footer } from '@/content/site';
+
+const CLASS =
+  'font-mono text-[10px] uppercase tracking-widest text-bone/40 transition-colors duration-120 hover:text-amber md:text-xs';
 
 export default function Footer() {
   return (
@@ -7,15 +11,18 @@ export default function Footer() {
         <p className="font-mono text-[10px] tracking-wide text-bone/40 md:text-xs">
           {footer.copyright}
         </p>
-        <ul className="flex items-center gap-5 md:gap-7">
+        <ul className="flex flex-wrap items-center gap-5 md:gap-7">
           {footer.links.map((link) => (
             <li key={link.label}>
-              <a
-                href={link.href}
-                className="font-mono text-[10px] uppercase tracking-widest text-bone/40 transition-colors duration-120 hover:text-amber md:text-xs"
-              >
-                {link.label}
-              </a>
+              {link.href.startsWith('/') ? (
+                <Link href={link.href} className={CLASS}>
+                  {link.label}
+                </Link>
+              ) : (
+                <a href={link.href} className={CLASS}>
+                  {link.label}
+                </a>
+              )}
             </li>
           ))}
         </ul>

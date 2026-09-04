@@ -7,7 +7,10 @@ const EASE = [0.16, 1, 0.3, 1] as const;
 
 export default function SpecSheet() {
   return (
-    <section id="spec" className="w-full border-t border-hairline px-5 py-24 md:px-10 md:py-36">
+    <section
+      id="spec"
+      className="w-full border-t border-hairline px-5 py-24 md:px-10 md:py-36 md:pr-[34vw]"
+    >
       <div className="w-full">
         <div className="mb-10 flex items-baseline justify-between md:mb-16">
           <p className="font-mono text-[10px] uppercase tracking-widest text-amber md:text-xs">
